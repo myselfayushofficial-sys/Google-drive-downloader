@@ -18,6 +18,7 @@ from pyrogram.types import Message
 
 import archiver
 import config
+import downloader
 import gdrive
 
 app = Client(
@@ -70,12 +71,21 @@ class _Throttle:
 
 @app.on_message(filters.command("start"))
 async def start(_: Client, message: Message):
+    if downloader.login_active():
+        mode = "🔓 Logged in to Google — downloading via your account (private files + better quota)."
+    else:
+        mode = (
+            "🔒 Anonymous mode — only public links work. Run `python login.py` on "
+            "the server to log in with Google for private files and fewer quota errors."
+        )
     await message.reply_text(
         "👋 Send me one or more Google Drive links and I'll download each file "
         "and upload it here.\n\n"
         "• Multiple links (one per line or space separated) are processed in order.\n"
         "• Files blocked by Drive's download-quota error are skipped automatically, "
-        "and I'll keep going with the rest."
+        "and I'll keep going with the rest.\n"
+        "• Files bigger than the upload limit are split into 7z volumes.\n\n"
+        f"{mode}"
     )
 
 
@@ -149,7 +159,7 @@ async def _process_one(
     await status.edit_text("⬇️ Downloading…")
     result = await loop.run_in_executor(
         None,
-        lambda: gdrive.download(link, config.DOWNLOAD_DIR, progress=on_progress),
+        lambda: downloader.download(link, config.DOWNLOAD_DIR, progress=on_progress),
     )
 
     # --- Upload phase -----------------------------------------------------

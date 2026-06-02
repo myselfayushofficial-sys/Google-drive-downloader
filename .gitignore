@@ -1,6 +1,10 @@
 # Secrets / local config
 .env
 
+# Google OAuth client + saved login token (never commit these)
+credentials.json
+token.json
+
 # Pyrogram session files
 *.session
 *.session-journal

@@ -3,3 +3,7 @@ tgcrypto==1.2.5
 requests==2.32.3
 tqdm==4.66.5
 python-dotenv==1.0.1
+
+# Optional: needed only for "Login with Google" (authenticated downloads).
+google-auth==2.34.0
+google-auth-oauthlib==1.2.1

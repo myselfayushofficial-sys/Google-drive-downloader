@@ -14,6 +14,10 @@ crashing the whole batch.
 
 ## Features
 
+- **Login with Google (optional)** — authenticate once and downloads go through
+  the Drive API, so you can fetch your **private** files and enjoy a per-account
+  quota that rarely trips the "too many users" wall. Without login it works
+  anonymously on public links.
 - Send one or many Drive links (one per line or space-separated) — processed in order.
 - Handles every common link shape: `/file/d/<id>/view`, `?id=<id>`, `/d/<id>`, or a bare file id.
 - Follows Drive's large-file "virus scan" confirmation page automatically.
@@ -47,7 +51,25 @@ crashing the whole batch.
    # then edit .env and fill in API_ID, API_HASH, BOT_TOKEN
    ```
 
-4. **Run**
+4. **(Optional) Log in with Google** — for private files & better quota
+
+   - In [Google Cloud Console](https://console.cloud.google.com/): create a
+     project → enable the **Google Drive API** → create an **OAuth client ID**
+     of type **Desktop app** → download the JSON and save it as
+     `credentials.json` next to the bot.
+   - Run the one-time login (on a machine with a browser):
+
+     ```bash
+     python login.py
+     ```
+
+     This opens Google's consent screen and saves a reusable `token.json`. The
+     bot then downloads via your account automatically. On a headless server,
+     forward the port over SSH (`ssh -L 8080:localhost:8080 user@server`) and
+     complete consent in your local browser.
+   - To stay anonymous, skip this step or set `USE_GOOGLE_AUTH=false`.
+
+5. **Run**
 
    ```bash
    python bot.py
@@ -124,7 +146,11 @@ and ship 100–150 GB files in parts.
 | File              | Purpose                                                        |
 | ----------------- | -------------------------------------------------------------- |
 | `bot.py`          | Telegram bot: link parsing, batching, progress, error-skipping |
-| `gdrive.py`       | Drive download logic + quota/confirmation handling             |
+| `downloader.py`   | Picks authenticated vs anonymous download path                 |
+| `gdrive.py`       | Anonymous link download + quota/confirmation handling          |
+| `gdrive_api.py`   | Authenticated Drive API download (logged-in mode)              |
+| `gauth.py`        | Google OAuth credential management                             |
+| `login.py`        | One-time `python login.py` browser login                       |
 | `archiver.py`     | Splits big files into multi-volume 7z archives                 |
 | `config.py`       | Loads settings from `.env`                                     |
 | `docker-compose.yml` | Optional self-hosted Bot API server                         |

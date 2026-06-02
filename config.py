@@ -45,3 +45,16 @@ SEVENZIP_LEVEL = int(os.getenv("SEVENZIP_LEVEL", "0"))
 
 # Optional password for the produced 7z volumes (also encrypts file names).
 SEVENZIP_PASSWORD = os.getenv("SEVENZIP_PASSWORD", "").strip() or None
+
+# --- Google login (optional) --------------------------------------------
+# When enabled and a token exists, downloads use the authenticated Drive API
+# (private files + friendlier quota) instead of anonymous link downloads.
+USE_GOOGLE_AUTH = os.getenv("USE_GOOGLE_AUTH", "true").strip().lower() in (
+    "1", "true", "yes", "on"
+)
+
+# OAuth client (Desktop app) JSON downloaded from Google Cloud Console.
+GOOGLE_CREDENTIALS_FILE = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
+
+# Where the reusable login token is stored after `python login.py`.
+GOOGLE_TOKEN_FILE = os.getenv("GOOGLE_TOKEN_FILE", "token.json")
