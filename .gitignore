@@ -1,0 +1,16 @@
+# Secrets / local config
+.env
+
+# Pyrogram session files
+*.session
+*.session-journal
+
+# Staged downloads
+downloads/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
