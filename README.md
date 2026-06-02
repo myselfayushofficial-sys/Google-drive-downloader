@@ -19,9 +19,12 @@ crashing the whole batch.
 - Follows Drive's large-file "virus scan" confirmation page automatically.
 - Detects the quota / "can't download right now" error page and **skips** it
   cleanly (no half-written HTML error files).
-- Live download **and** upload progress, throttled so Telegram doesn't rate-limit edits.
-- Optional user allow-list.
-- Staged files are deleted after upload.
+- **Huge files (100–150 GB+)**: anything over the upload limit is split into
+  multi-volume 7z archives — `file.7z.001`, `.002`, `.003`, … — and each part
+  is uploaded in order. Reassemble with any 7-Zip client.
+- Live download, **split**, and upload progress, throttled so Telegram doesn't rate-limit edits.
+- Optional 7z password (encrypts file names too) and optional user allow-list.
+- Staged files and volumes are deleted as soon as each upload finishes.
 
 ## Setup
 
@@ -33,6 +36,8 @@ crashing the whole batch.
 
    ```bash
    pip install -r requirements.txt
+   # 7-Zip is required for splitting big files:
+   sudo apt-get install -y p7zip-full     # Debian/Ubuntu  (provides `7z`)
    ```
 
 3. **Configure**
@@ -60,15 +65,59 @@ https://drive.google.com/file/d/2ZyXwVuTsRqPoNmLkJiHgFeDcBa/view
 The bot downloads each file and uploads it back. If link #1 is quota-blocked,
 you'll see a `⏭️ Skipped` notice and it will still upload link #2.
 
-## Notes & limits
+## Big files & chunked 7z upload
 
-- Telegram bots can upload files up to **2 GB** (4 GB with a Premium account
-  on the uploading session). Larger files will fail to upload — that file is
-  skipped, the batch continues.
+When a downloaded file is larger than `PART_SIZE_MB` (default 2000 MB), the bot
+runs `7z` to split it into fixed-size volumes and uploads each one:
+
+```
+movie.mkv.7z.001   (2000 MB)
+movie.mkv.7z.002   (2000 MB)
+movie.mkv.7z.003   (1234 MB)
+```
+
+So a 150 GB download arrives as ~75 parts. Download all parts into one folder
+and open `.7z.001` with any 7-Zip client to reassemble the original file.
+
+- Default mode is **store** (`SEVENZIP_LEVEL=0`) — it just chunks, no slow
+  compression, which is right for already-compressed media. Raise the level if
+  you want compression.
+- **Disk space:** the server needs room for the full download *plus* its
+  volumes while splitting — budget roughly **2× the file size** of free disk
+  (e.g. ~300 GB free to handle a 150 GB file). Each volume is deleted right
+  after it uploads.
+
+## Upload limits & the local Bot API server
+
+This is the part people get confused about, so to be precise:
+
+- **This bot uses Pyrogram**, which speaks Telegram's **MTProto** protocol
+  directly. That gives **2 GB per file** uploads out of the box (4 GB if the
+  uploading account has Premium) — **no local server required.** The 50 MB
+  Bot-API upload cap does **not** apply here.
+- The classic *"host the Bot API locally for 2 GB"* advice only matters if you
+  use a **Bot API** library (`python-telegram-bot`, `aiogram`, `telebot`),
+  where `api.telegram.org` caps uploads at 50 MB and a self-hosted
+  [`telegram-bot-api`](https://github.com/tdlib/telegram-bot-api) server raises
+  that to 2000 MB.
+
+For that case a ready-to-use local server is included in
+[`docker-compose.yml`](docker-compose.yml):
+
+```bash
+docker compose up -d telegram-bot-api
+# then point your Bot API library at http://localhost:8081/bot<token>/...
+```
+
+Either way, the **7z chunking above is what lets you exceed the per-file limit**
+and ship 100–150 GB files in parts.
+
+## Notes
+
 - This tool only downloads files **you have permission to access**. It does not
   bypass Drive permissions; the quota error is a temporary rate limit that
   usually clears within 24 hours.
-- `DOWNLOAD_DIR` is just a staging area; files are removed once uploaded.
+- `DOWNLOAD_DIR` is just a staging area; files (and volumes) are removed once uploaded.
 
 ## Project layout
 
@@ -76,5 +125,7 @@ you'll see a `⏭️ Skipped` notice and it will still upload link #2.
 | ----------------- | -------------------------------------------------------------- |
 | `bot.py`          | Telegram bot: link parsing, batching, progress, error-skipping |
 | `gdrive.py`       | Drive download logic + quota/confirmation handling             |
+| `archiver.py`     | Splits big files into multi-volume 7z archives                 |
 | `config.py`       | Loads settings from `.env`                                     |
+| `docker-compose.yml` | Optional self-hosted Bot API server                         |
 | `requirements.txt`| Dependencies                                                   |

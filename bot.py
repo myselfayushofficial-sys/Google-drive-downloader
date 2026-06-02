@@ -16,6 +16,7 @@ import time
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
+import archiver
 import config
 import gdrive
 
@@ -152,34 +153,135 @@ async def _process_one(
     )
 
     # --- Upload phase -----------------------------------------------------
-    await _safe_edit(status, f"⬆️ Uploading {result.filename}…")
-    up_throttle = _Throttle()
+    limit = config.PART_SIZE_MB * 1024 * 1024
+    if result.size <= limit:
+        # Small enough to send in one go.
+        try:
+            await _upload_document(
+                client,
+                message,
+                status,
+                path=result.path,
+                file_name=result.filename,
+                caption=f"📁 {result.filename}\n💾 {_human_size(result.size)}",
+                label=result.filename,
+            )
+            await status.edit_text(f"✅ Uploaded {result.filename}")
+        finally:
+            _safe_remove(result.path)
+        return
+
+    # Too big for one message: split into 7z volumes, upload each in order.
+    if not archiver.is_available():
+        _safe_remove(result.path)
+        raise gdrive.DriveDownloadError(
+            f"{result.filename} is {_human_size(result.size)}, which exceeds the "
+            f"{config.PART_SIZE_MB} MB upload limit, but 7-Zip is not installed to "
+            f"split it. Install p7zip-full on the server."
+        )
+
+    split_throttle = _Throttle()
+
+    def on_split(done: int, total: int):
+        if not split_throttle.ready():
+            return
+        pct = done / total * 100 if total else 0
+        asyncio.run_coroutine_threadsafe(
+            _safe_edit(
+                status,
+                f"📦 {result.filename} is {_human_size(result.size)} — splitting "
+                f"into {config.PART_SIZE_MB} MB 7z volumes… {pct:.0f}%",
+            ),
+            loop,
+        )
+
+    await _safe_edit(
+        status,
+        f"📦 {result.filename} is {_human_size(result.size)} — splitting into "
+        f"{config.PART_SIZE_MB} MB 7z volumes…",
+    )
+    parts = await loop.run_in_executor(
+        None,
+        lambda: archiver.split_archive(
+            result.path,
+            config.DOWNLOAD_DIR,
+            part_size_mb=config.PART_SIZE_MB,
+            level=config.SEVENZIP_LEVEL,
+            password=config.SEVENZIP_PASSWORD,
+            progress=on_split,
+        ),
+    )
+    # Original is no longer needed once the volumes exist.
+    _safe_remove(result.path)
+
+    n = len(parts)
+    try:
+        for i, part in enumerate(parts, start=1):
+            part_name = os.path.basename(part)
+            part_size = os.path.getsize(part)
+            await _upload_document(
+                client,
+                message,
+                status,
+                path=part,
+                file_name=part_name,
+                caption=(
+                    f"📦 {result.filename}\n"
+                    f"📎 Part {i}/{n} — {part_name}\n"
+                    f"💾 {_human_size(part_size)}"
+                ),
+                label=f"{part_name} ({i}/{n})",
+            )
+            _safe_remove(part)
+        await status.edit_text(
+            f"✅ Uploaded {result.filename} in {n} parts "
+            f"({result.filename}.7z.001 … .{n:03d}). "
+            f"Reassemble with any 7-Zip client."
+        )
+    finally:
+        # Remove any volumes left behind if the loop was interrupted.
+        for part in parts:
+            _safe_remove(part)
+
+
+async def _upload_document(
+    client: Client,
+    message: Message,
+    status: Message,
+    *,
+    path: str,
+    file_name: str,
+    caption: str,
+    label: str,
+) -> None:
+    """Upload a single file as a Telegram document with throttled progress."""
+    throttle = _Throttle()
 
     async def upload_progress(current: int, total: int):
-        if not up_throttle.ready():
+        if not throttle.ready():
             return
         pct = current / total * 100 if total else 0
         await _safe_edit(
             status,
-            f"⬆️ Uploading {result.filename}… {pct:.0f}% "
+            f"⬆️ Uploading {label}… {pct:.0f}% "
             f"({_human_size(current)}/{_human_size(total)})",
         )
 
+    await _safe_edit(status, f"⬆️ Uploading {label}…")
+    await client.send_document(
+        chat_id=message.chat.id,
+        document=path,
+        file_name=file_name,
+        caption=caption,
+        progress=upload_progress,
+    )
+
+
+def _safe_remove(path: str) -> None:
     try:
-        await client.send_document(
-            chat_id=message.chat.id,
-            document=result.path,
-            file_name=result.filename,
-            caption=f"📁 {result.filename}\n💾 {_human_size(result.size)}",
-            progress=upload_progress,
-        )
-        await status.edit_text(f"✅ Uploaded {result.filename}")
-    finally:
-        # Clean up the staged file whether or not the upload succeeded.
-        try:
-            os.remove(result.path)
-        except OSError:
-            pass
+        os.remove(path)
+    except OSError:
+        pass
 
 
 async def _safe_edit(status: Message, text: str) -> None:
